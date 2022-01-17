@@ -22,6 +22,9 @@ use MultiSafepay\Api\Transactions\OrderRequest\Arguments\CustomerDetails;
 use MultiSafepay\Shopware6\Util\RequestUtil;
 use MultiSafepay\ValueObject\Customer\Address;
 use MultiSafepay\ValueObject\Customer\AddressParser;
+use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressEntity;
+use Shopware\Core\Checkout\Order\OrderEntity;
+use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use MultiSafepay\ValueObject\Customer\Country;
 use MultiSafepay\ValueObject\Customer\EmailAddress;
@@ -39,18 +42,19 @@ class CustomerBuilder implements OrderRequestBuilderInterface
     private $requestUtil;
 
     private $languageRepository;
-
     /**
-     * CustomerBuilder constructor.
-     *
-     * @param RequestUtil $requestUtil
+     * @var EntityRepositoryInterface
      */
+    private $addressRepository;
+
     public function __construct(
         RequestUtil $requestUtil,
-        EntityRepositoryInterface $languageRepository
+        EntityRepositoryInterface $languageRepository,
+        EntityRepositoryInterface $addressRepository
     ) {
         $this->requestUtil = $requestUtil;
         $this->languageRepository = $languageRepository;
+        $this->addressRepository = $addressRepository;
     }
 
     /**
@@ -67,7 +71,7 @@ class CustomerBuilder implements OrderRequestBuilderInterface
     ): void {
         $request = $this->requestUtil->getGlobals();
         $customer = $salesChannelContext->getCustomer();
-        $billingAddress = $transaction->getOrder()->getBillingAddress();
+        $billingAddress = $this->getBillingAddress($transaction->getOrder(), $salesChannelContext->getContext());
         [$billingStreet, $billingHouseNumber] =
             (new AddressParser())->parse($billingAddress->getStreet());
 
@@ -112,5 +116,17 @@ class CustomerBuilder implements OrderRequestBuilderInterface
             return 'en_GB';
         }
         return str_replace('-', '_', $language->getLocale()->getCode());
+    }
+
+
+    private function getBillingAddress(OrderEntity $order, Context $context): OrderAddressEntity
+    {
+        if ($order->getBillingAddress() !== null) {
+            return $order->getBillingAddress();
+        }
+
+        $criteria = new Criteria([$order->getBillingAddressId()]);
+        $criteria->addAssociation('country');
+        return $this->addressRepository->search($criteria, $context)->first();
     }
 }

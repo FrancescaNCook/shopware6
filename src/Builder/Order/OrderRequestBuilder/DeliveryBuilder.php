@@ -17,6 +17,9 @@ declare(strict_types=1);
 
 namespace MultiSafepay\Shopware6\Builder\Order\OrderRequestBuilder;
 
+use Shopware\Core\Checkout\Order\OrderEntity;
+use Shopware\Core\Framework\DataAbstractionLayer\EntityRepositoryInterface;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use MultiSafepay\Api\Transactions\OrderRequest;
 use MultiSafepay\Api\Transactions\OrderRequest\Arguments\CustomerDetails;
 use MultiSafepay\ValueObject\Customer\Address;
@@ -25,11 +28,19 @@ use MultiSafepay\ValueObject\Customer\Country;
 use MultiSafepay\ValueObject\Customer\EmailAddress;
 use MultiSafepay\ValueObject\Customer\PhoneNumber;
 use Shopware\Core\Checkout\Payment\Cart\AsyncPaymentTransactionStruct;
+use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\Validation\DataBag\RequestDataBag;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 
 class DeliveryBuilder implements OrderRequestBuilderInterface
 {
+    private $orderRepository;
+
+    public function __construct(EntityRepositoryInterface $orderRepository)
+    {
+        $this->orderRepository = $orderRepository;
+    }
+
     /**
      * @param OrderRequest $orderRequest
      * @param AsyncPaymentTransactionStruct $transaction
@@ -44,7 +55,8 @@ class DeliveryBuilder implements OrderRequestBuilderInterface
     ): void {
         $customer = $salesChannelContext->getCustomer();
 
-        $shippingOrderAddress = $this->getShippingOrderAddress($transaction);
+        $shippingOrderAddress = $this->getShippingOrderAddress($transaction, $salesChannelContext);
+
         if ($shippingOrderAddress === null) {
             return;
         }
@@ -73,9 +85,19 @@ class DeliveryBuilder implements OrderRequestBuilderInterface
         $orderRequest->addDelivery($deliveryDetails);
     }
 
-    private function getShippingOrderAddress(AsyncPaymentTransactionStruct $transaction)
+    private function getShippingOrderAddress(AsyncPaymentTransactionStruct $transaction, SalesChannelContext $salesChannelContext)
     {
         $deliveries = $transaction->getOrder()->getDeliveries();
+
+        if ($deliveries === null) {
+            $deliveries = $this->getOrderFromDatabase(
+                $transaction->getOrder()->getId(),
+                $salesChannelContext->getContext()
+            )->getDeliveries();
+        }
+
+
+
         if ($deliveries === null
             || $deliveries->first() === null
             || $deliveries->first()->getShippingOrderAddress() === null
@@ -83,5 +105,14 @@ class DeliveryBuilder implements OrderRequestBuilderInterface
             return null;
         }
         return $deliveries->first()->getShippingOrderAddress();
+    }
+
+    private function getOrderFromDatabase(string $orderId, Context $context): OrderEntity
+    {
+        $criteria = new Criteria([$orderId]);
+        $criteria->addAssociation('deliveries');
+        $criteria->addAssociation('deliveries.shippingOrderAddress.country');
+
+        return $this->orderRepository->search($criteria, $context)->first();
     }
 }
